@@ -16,6 +16,8 @@ build
 node_modules
 
 settings_local.js
-scripts/prefillParameters.json
+settings_test.js
+scripts/*.json
 data/
 dump.rdb
+static/uploads

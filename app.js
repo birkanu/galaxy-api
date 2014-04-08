@@ -9,6 +9,7 @@ var user = require('./lib/user');
 
 
 [
+    'feedback',
     'game/board',
     'game/detail',
     'game/featured',
@@ -27,6 +28,16 @@ var user = require('./lib/user');
 });
 
 var serverName = serverHTTP.name;
+
+serverHTTP.get('/', function(req, res) {
+    // TODO: Make something prettier.
+    var body = '<style>body { font: 150% sans-serif; margin: 4%; }</style>' +
+               '<a href="http://docs.galaxy.apiary.io">Galaxy API Docs</a>';
+    res.contentType = 'text/html';
+    res.header('Content-Type', 'text/html');
+    res.write(body);
+    res.end();
+});
 
 serverHTTP.listen(process.env.PORT || 5000, function() {
     console.log('%s HTTP server listening at %s', serverName, serverHTTP.url);

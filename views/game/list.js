@@ -1,4 +1,5 @@
 var _ = require('lodash');
+var Promise = require('es6-promise').Promise;
 
 var auth = require('../../lib/auth');
 var db = require('../../db');
@@ -9,7 +10,7 @@ const DEFAULT_COUNT = 15;
 
 module.exports = function(server) {
     // Sample usage:
-    // % curl 'http://localhost:5000/game/list'
+    // % curl 'http://localhost:5000/game/list?_user=ssa_token&developer=1&status=pending'
     server.get({
         url: '/game/list',
         swagger: {
@@ -32,15 +33,20 @@ module.exports = function(server) {
             status: {
                 description: 'Filter by current status of the game',
                 isRequired: false,
-                isIn: ['approved', 'pending', 'rejected']
+                isIn: ['approved', 'pending', 'rejected', 'disabled', 'deleted']
+            },
+            developer: {
+                description: 'Filter by requesting developer',
+                isRequired: false
             }
         }
     }, db.redisView(function(client, done, req, res, wrap) {
         var GET = req.params;
         var count = 'count' in GET ? parseInt(GET.count, 10) : DEFAULT_COUNT;
         var statusFilter = GET.status;
+        var developerFilter = !!+GET.developer;
 
-        if (!statusFilter) {
+        if (!(statusFilter || developerFilter)) {
             fetchGames();
             return;
         }
@@ -60,27 +66,50 @@ module.exports = function(server) {
 
             var permissions = userData.permissions;
             for (var p in permissions) {
-                // 'status' should only be accessible to reviewers and admins
-                if (permissions[p] && (p === 'reviewer' || p === 'admin')) {
-                    return fetchGames();
+                // 'status' filter should only be accessible to reviewers and admins
+                // 'developer' filter should only be accessible to developers
+                if ((statusFilter && permissions[p] && (p === 'reviewer' || p === 'admin')) ||
+                    (developerFilter && permissions[p] && (p === 'developer'))) {
+                    return fetchGames(userData);
                 }
             }
             return notAuthorized();
         });
 
         function notAuthorized() {
-            res.json(401, {
-                error: 'not_permitted', 
+            res.json(403, {
+                error: 'bad_permission', 
                 detail: 'provided filters require additional permissions'
             });
             done();
         };
 
-        function fetchGames() {
+        function fetchGames(userData) {
             // TODO: Filter only 'count' games without having to fetch them all first
             // (will be somewhat tricky since we need to ensure order to do pagination
             // properly, and we use UUIDs for game keys that have no logical order in the db)
-            gamelib.getGameList(client, null, function(games) {
+            if (developerFilter) {
+                client.hget('gameIDsByDeveloperID', userData.id, function(err, ids) {
+                    if (err) {
+                        res.json(500, {error: err || 'db_error'});
+                        done();
+                        return;
+                    }
+                    if (!ids) {
+                        gameListHandler(null, []);
+                    } else {
+                        gamelib.getGameList(client, JSON.parse(ids), gameListHandler);
+                    }
+                });
+            } else {
+                gamelib.getGameList(client, null, gameListHandler);
+            }
+
+            function gameListHandler(err, games) {
+                if (err || !games) {
+                    res.json(500, {error: err || 'db_error'});
+                    return done();
+                }
                 var filteredGames = games;
                 if (statusFilter) {
                     // Filter for games matching the provided status
@@ -89,10 +118,42 @@ module.exports = function(server) {
                     });
                 }
                 // Pick the first 'count' games
-                var gamesUpToCount = _.first(filteredGames, count).map(gamelib.publicGameObj);
-                res.json(gamesUpToCount);
-                done();
-            });
+                var gamesUpToCount = _.first(filteredGames, count);
+
+                if (developerFilter) {
+                    // Add queue position if using the developer filter
+                    function queuePromise(game) {
+                        return new Promise(function(resolve, reject) {
+                            if (game.status === 'pending') {
+                                client.zrank('gamesByStatus:pending', game.id,
+                                    function(err, rank) {
+                                        if (err) {
+                                            reject(err);
+                                        } else {
+                                            game.queuePosition = rank + 1;
+                                            resolve(game);
+                                        }
+                                });
+                            } else {
+                                resolve(game);
+                            }                            
+                        });
+                    }
+
+                    Promise.all(gamesUpToCount.map(queuePromise)).then(function(games) {
+                        var publicGames = games.map(gamelib.publicGameObj);
+                        res.json(publicGames);
+                        done();
+                    }, function(err) {
+                        res.json(500, {error: err || 'db_error'});
+                        done();
+                    });
+                } else {
+                    var publicGames = gamesUpToCount.map(gamelib.publicGameObj);
+                    res.json(publicGames);
+                    done();
+                }
+            }
         }
     }));
 };

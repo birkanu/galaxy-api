@@ -1,13 +1,13 @@
 var _ = require('lodash');
+
 var db = require('../../db');
 var gamelib = require('../../lib/game');
+var userlib = require('../../lib/user');
 var utils = require('../../lib/utils');
-var user = require('../../lib/user');
-
 
 module.exports = function(server) {
     // Sample usage:
-    // % curl -X POST 'http://localhost:5000/game/submit' -d 'name=Mario Bros&app_url=http://mariobro.se&icons=128&screenshots=yes'
+    // % curl -X POST 'http://localhost:5000/game/submit?_user=ssa_token' -H 'Content-Type: application/json' -H 'Accept: application/json' -d '{"app_url":"http://nuttyninjas.com/","artwork":{"background":"background.jpg"},"description":"Nutty Ninjas is a real-time shooter that brings the experience of social multiplayer gaming to a whole new level; it is a console-style game that can be played anywhere and anytime, simply with your computer and mobile devices. Multiple players can join a common gameplay screen just by using their mobile devices, and control their ninja character to unleash dangerous weapons at fellow players!","developer":{"name":"Yang Shun","url":"http://yangshun.im/"},"genre":"action","homepage_url":"http://www.nuttyninjas.com","icons":"http://png-4.findicons.com/files/icons/2297/super_mario/256/paper_mario.png","name":"Nutty Ninjas","privacy_policy_url":"http://una-org.github.io/demos.html","screenshots":["http://www.digitaltrends.com/wp-content/uploads/2011/02/nintendo-new-super-mario-bros-ds-art-screenshot.jpg","http://splitkick.com/wp-content/uploads/2013/01/newsuper2img.jpg","http://www.mariowiki.com/images/f/fc/SuperMarioBrosArtwork2.jpg","http://www.digitaltrends.com/wp-content/uploads/2011/02/nintendo-new-super-mario-bros-ds-art-screenshot.jpg","http://splitkick.com/wp-content/uploads/2013/01/newsuper2img.jpg","http://www.mariowiki.com/images/f/fc/SuperMarioBrosArtwork2.jpg","http://www.digitaltrends.com/wp-content/uploads/2011/02/nintendo-new-super-mario-bros-ds-art-screenshot.jpg","http://splitkick.com/wp-content/uploads/2013/01/newsuper2img.jpg","http://www.mariowiki.com/images/f/fc/SuperMarioBrosArtwork2.jpg"],"slug":"nutty-ninjas","videos":["http://www.youtube.com/embed/4kvT0dywaF8","http://www.youtube.com/embed/1Sow2O8D9Ok"]}'
     server.post({
         url: '/game/submit',
         swagger: {
@@ -16,150 +16,65 @@ module.exports = function(server) {
             summary: 'Submission'
         },
         validation: {
-            app_url: {
-                description: 'App URL',
-                isRequired: true,
-                isUrl: true
-            },
-            homepage_url: {
-                description: 'Homepage URL',
-                isRequired: false,
-                isUrl: true
-            },
-            icons: {
-                description: 'Icons',
-                isRequired: false,
-            },
-            name: {
-                description: 'Name',
-                isRequired: true,
-                max: 128
-            },
-            screenshots: {
-                description: 'Screenshots',
-                isRequired: false
-            }
+            // TODO: Validate each field of the game (#122)
+            app_url: { isRequired: true },
+            homepage_url: { isRequired: true },
+            icons: { isRequired: true },
+            name: { isRequired: true },
+            number_of_players: { isRequired: true },
+            screenshots: { isRequired: true }
         }
-    }, db.redisView(function(client, done, req, res, wrap) {
-        var POST = req.params;
-        slug = utils.slugify(POST.slug || POST.name);
-        var data = {
-            app_url: POST.app_url,
-            appcache_path: POST.appcache_path,
-            artwork: {
-                background: POST.artwork_background
-            },
-            created: new Date(),
-            default_locale: POST.default_locale,
-            description: POST.description,
-            developer: {
-                name: POST.developer_name,
-                url: POST.developer_url
-            },
-            fullscreen: POST.fullscreen,
-            genre: POST.genre,
-            homepage_url: POST.homepage_url,
-            icons: POST.icons,
-            license: POST.license,
-            locales: POST.locales,
-            name: POST.name,
-            orientation: POST.orientation,
-            privacy_policy_url: POST.privacy_policy_url,
-            screenshots: POST.screenshots,
-            status: 'pending',
-            slug: slug,
-            videos: POST.videos
-        };
+    }, userlib.userDataView(function(user, client, done, req, res) {
+        if (!user.permissions || (!user.permissions.admin && !user.permissions.developer)) {
+            res.json(403, {error: 'bad_permission'});
+            return done();
+        }
 
-        gamelib.newGame(client, data);
-        res.json(data);
+        var gameData = gamelib.publicGameObj(req.params);
+        gamelib.newGame(client, gameData, user.id, db.plsNoError(res, done, function(game) {
+            res.json(game);
+            return done();
+        }));
     }));
 
     // Sample usage:
-    // % curl -X PUT 'http://localhost:5000/game/mario-bros/edit'
+    // % curl -X PUT 'http://localhost:5000/game/nutty_ninjas/edit?_user=ssa_token' -H 'Content-Type: application/json' -H 'Accept: application/json' -d '{"app_url":"http://nuttyninjas.com/","artwork":{"background":"background.jpg"},"description":"Edited Description","developer":{"name":"Yang Shun","url":"http://yangshun.im/"},"genre":"action","homepage_url":"http://www.nuttyninjas.com","icons":"http://png-4.findicons.com/files/icons/2297/super_mario/256/paper_mario.png","name":"Nutty Ninjas","privacy_policy_url":"http://una-org.github.io/demos.html","screenshots":["http://www.digitaltrends.com/wp-content/uploads/2011/02/nintendo-new-super-mario-bros-ds-art-screenshot.jpg","http://splitkick.com/wp-content/uploads/2013/01/newsuper2img.jpg","http://www.mariowiki.com/images/f/fc/SuperMarioBrosArtwork2.jpg","http://www.digitaltrends.com/wp-content/uploads/2011/02/nintendo-new-super-mario-bros-ds-art-screenshot.jpg","http://splitkick.com/wp-content/uploads/2013/01/newsuper2img.jpg","http://www.mariowiki.com/images/f/fc/SuperMarioBrosArtwork2.jpg","http://www.digitaltrends.com/wp-content/uploads/2011/02/nintendo-new-super-mario-bros-ds-art-screenshot.jpg","http://splitkick.com/wp-content/uploads/2013/01/newsuper2img.jpg","http://www.mariowiki.com/images/f/fc/SuperMarioBrosArtwork2.jpg"],"slug":"nutty-ninjas","videos":["http://www.youtube.com/embed/4kvT0dywaF8","http://www.youtube.com/embed/1Sow2O8D9Ok"]}'
     server.put({
-        url: '/game/edit',
+        url: '/game/:slug/edit',
         swagger: {
             nickname: 'edit',
             notes: 'Edit game',
             summary: 'Edit game details'
         },
         validation: {
-            app_url: {
-                description: 'App URL',
-                isRequired: true,
-                isUrl: true
-            },
-            slug: {
-                description: 'Genre slug',
-                isRequired: true
-            },
-            homepage_url: {
-                description: 'Homepage URL',
-                isRequired: false,
-                isUrl: true
-            },
-            name: {
-                description: 'Name',
-                isRequired: true,
-            }
+            // TODO: Validate each field of the game (#122)
+            app_url: { isRequired: true },
+            homepage_url: { isRequired: true },
+            icons: { isRequired: true },
+            name: { isRequired: true },
+            number_of_players: { isRequired: true },
+            screenshots: { isRequired: true },
+            slug: { isRequired: true }
         }
-    }, db.redisView(function(client, done, req, res, wrap) {
-        var PUT = req.params;
-        var slug = PUT.slug;
-        var email = req._email;
-
-        if (!slug) {
-            res.json(400, {error: 'bad_game'});
-            done();
-            return;
+    }, userlib.userDataView(function(user, client, done, req, res) {
+        if (!user.permissions || (!user.permissions.admin && !user.permissions.developer)) {
+            res.json(403, {error: 'bad_permission'});
+            return done();
         }
 
-        if (!email) {
-            notAuthorized();
-            return;
-        }
+        var gameData = gamelib.publicGameObj(req.params);
+        var slug = gameData.slug;
 
-        user.getUserFromEmail(client, email, function(err, userData) {
-            if (err) {
-                res.json(500, {error: err || 'db_error'});
-                done();
-                return;
-            }
+        gamelib.getGameFromSlug(client, slug, db.plsNoError(res, done, function(game) {
+            // The actual game data contains some fields that are not public editable,
+            // so we need to merge the game with these protected fields.
+            var protectedFields = gamelib.protectedFields(game);
+            gameData = _.extend(gameData, protectedFields);
 
-            var permissions = userData.permissions;
-            for (var p in permissions) {
-                // Editing games should only be accessible to developers
-                if (permissions[p] && (p === 'developer')) {
-                    return updateGame();
-                }
-            }
-            return notAuthorized();
-        });
-
-        function notAuthorized() {
-            res.json(401, {
-                error: 'not_permitted', 
-                detail: 'provided filters require additional permissions'
-            });
-            done();
-        };
-
-        function updateGame() {
-            // TODO: Add icon, screenshots and videos to dataToUpdate
-            var dataToUpdate = _.pick(PUT, 'name', 'slug', 'app_url', 'description', 'privacy_policy_url', 'genre');
-            
-            gamelib.getGameFromSlug(client, slug, function(err, game) {
-                if (err) {
-                    res.json(500, {error: err});
-                } else if (!game) {
-                    res.json(400, {error: 'bad_game'});
-                } else {
-                    gamelib.updateGame(client, game, dataToUpdate);
-                    res.json(dataToUpdate);
-                }
-                done();
-            });
-        }
+            gamelib.updateGame(client, slug, gameData, db.plsNoError(res, done, function(game) {
+                res.json(game);
+                return done();
+            }));
+        }));
     }));
 };
